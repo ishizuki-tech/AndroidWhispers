@@ -1,13 +1,14 @@
-// file: whisper/build.gradle.kts
+// file: nativelib/build.gradle.kts
 // ============================================================
-// ✅ whisper.cpp JNI Library Module — Gradle 8.13 / Kotlin 2.2 Compatible
+// ✅ whisper.cpp JNI Library Module — Final Stable v2.0
 // ------------------------------------------------------------
-// • Uses compilerOptions DSL
-// • Uses correct externalNativeBuild CMake args under defaultConfig
-// • Fully compatible with AGP 8.13.0 and Kotlin 2.2.20
+// • AGP 8.13 / Gradle 8.14 / Kotlin 2.2 / NDK 28.1
+// • Stable externalNativeBuild + GGML flags
+// • No GPU deps (CPU-only Android build)
 // ============================================================
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.io.ByteArrayOutputStream
 
 plugins {
     id("com.android.library")
@@ -17,25 +18,41 @@ plugins {
 android {
     namespace = "com.whispercpp"
     compileSdk = 36
+    ndkVersion = "28.1.13356709"
 
     defaultConfig {
         minSdk = 26
+        consumerProguardFiles("consumer-rules.pro")
 
-        // ABI filter
         ndk {
+            // ✅ Only build for arm64 for Android devices
             abiFilters += listOf("arm64-v8a")
         }
 
-        consumerProguardFiles("consumer-rules.pro")
-
-        // ✅ Correct location for CMake arguments (under defaultConfig)
         @Suppress("UnstableApiUsage")
         externalNativeBuild {
             cmake {
-                arguments(
+                val ggmlHome = project.findProperty("GGML_HOME")?.toString()
+
+                val args = mutableListOf(
                     "-DANDROID_STL=c++_shared",
-                    project.findProperty("GGML_HOME")?.let { "-DGGML_HOME=$it" } ?: "-DGGML_HOME="
+                    "-DGGML_METAL=OFF",
+                    "-DGGML_CUDA=OFF",
+                    "-DGGML_OPENCL=OFF",
+                    "-DGGML_VULKAN=OFF",
+                    "-DWHISPER_EXTRA=OFF"
                 )
+
+                if (!ggmlHome.isNullOrBlank()) {
+                    args += "-DGGML_HOME=$ggmlHome"
+                }
+
+                // ✅ Correct Kotlin DSL call
+                arguments.addAll(args)
+
+                // ✅ O2 is faster to build + stable
+                cFlags.add("-O2")
+                cppFlags.add("-O2 -fexceptions -frtti")
             }
         }
     }
@@ -70,19 +87,18 @@ android {
         }
     }
 
-    ndkVersion = "28.1.13356709"
+    // ✅ CMake Path (whisper.cpp JNI)
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/jni/whisper/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 
     sourceSets {
         getByName("main") {
             java.srcDirs("src/main/java", "src/main/kotlin")
             jniLibs.srcDirs("src/main/jniLibs")
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/jni/whisper/CMakeLists.txt")
-            version = "3.22.1"
         }
     }
 

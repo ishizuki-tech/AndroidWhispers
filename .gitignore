@@ -28,9 +28,10 @@
 # Local environment / secrets
 # -----------------------------------------
 local.properties
-gradle.properties
 !gradle.public.properties
 !gradle-example.properties
+# Keep gradle.properties tracked
+!gradle.properties
 
 # -----------------------------------------
 # Android build artifacts & packaging
