@@ -1,12 +1,12 @@
 # ============================================================
-# 🚀 WhispersCpp-Android — CI/CD Smart Release + QR + History Edition v0.7
+# 🚀 WhispersCpp-Android — CI/CD Smart Release + QR + History v0.8
 # ------------------------------------------------------------
-# • Smart Detect → Conditional Build → Always Publish
+# • Force Build Option (always rebuild)
 # • Auto GitHub Release + QR Code + 20-Release History
 # • Safe Wiki push / MemorySafe Swap / Glass UI HTML
 # ============================================================
 
-name: Android Build & Release (Smart Detect v0.7)
+name: Android Build & Release (Smart Detect v0.8)
 
 on:
   workflow_dispatch:
@@ -19,6 +19,10 @@ on:
         description: "Run Lint & Unit Tests before build"
         type: boolean
         default: true
+      force_build:
+        description: "Force rebuild regardless of diff detection"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -35,6 +39,9 @@ env:
   _JAVA_OPTIONS: "-Xmx4g"
   GRADLE_OPTS: "-Xmx4g -Dorg.gradle.daemon=true"
 
+# ============================================================
+# 🧠 Smart Detect (with Force Build option)
+# ============================================================
 jobs:
   detect:
     runs-on: ubuntu-latest
@@ -49,18 +56,33 @@ jobs:
       - id: detect
         run: |
           set -Eeuo pipefail
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [ -z "$LAST_TAG" ]; then
+          if [ "${{ inputs.force_build }}" = "true" ]; then
+            echo "⚙️ Force Build enabled — skipping diff detection."
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          echo "🔎 Checking for source changes..."
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            echo "🆕 First build"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           DIFF=$(git diff --name-only "$LAST_TAG" HEAD -- app/ nativelib/ **/*.kts **/*.cpp **/*.h **/*.hpp)
           if [ -n "$DIFF" ]; then
+            echo "✅ Detected source changes:"
+            echo "$DIFF"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
+            echo "🟡 No source changes since $LAST_TAG"
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # ============================================================
+  # 🏗️ Build (only if changed or forced)
+  # ============================================================
   build:
     runs-on: ubuntu-latest
     needs: detect
@@ -73,10 +95,12 @@ jobs:
           fetch-depth: 0
           submodules: recursive
           ref: ${{ inputs.branch || github.ref_name }}
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
+
       - uses: android-actions/setup-android@v3
         with:
           ndk-version: ${{ env.NDK_VERSION }}
@@ -107,7 +131,7 @@ jobs:
           TAG="v${VERSION}-$(date '+%Y%m%d-%H%M')"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           jq -n --arg tag "$TAG" --arg date "$DATE" \
-            '{version_tag:$tag, generated:$date, source_changed:true, release_history:20}' > meta/models.json
+            '{version_tag:$tag, generated:$date, source_changed:true, release_history:20, forced_build:"${{ inputs.force_build }}"}' > meta/models.json
           cat meta/models.json
 
       - uses: actions/upload-artifact@v4
@@ -119,6 +143,9 @@ jobs:
             meta/models.json
           retention-days: 7
 
+  # ============================================================
+  # 🚀 Always Publish (reuse last release if unchanged)
+  # ============================================================
   publish:
     runs-on: ubuntu-latest
     needs: [detect, build]
@@ -161,13 +188,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🌈 Generate Wiki + Pages (QR + History)
+      - name: 🌈 Generate Wiki + Glass UI (QR + History + Force Flag)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           TAG=$(jq -r '.version_tag' meta/models.json)
           DATE=$(jq -r '.generated' meta/models.json)
+          FORCED=$(jq -r '.forced_build // "false"' meta/models.json)
           REPO="${{ github.repository }}"
           OWNER="${{ github.repository_owner }}"
           BASE_URL="https://${OWNER}.github.io/$(basename ${REPO})/"
@@ -175,6 +203,8 @@ jobs:
 
           echo "# 📦 WhispersCpp-Android (${TAG})" > wiki/Downloads.md
           echo "Updated: ${DATE}" >> wiki/Downloads.md
+          echo "" >> wiki/Downloads.md
+          echo "Force Build: **${FORCED}**" >> wiki/Downloads.md
           echo "" >> wiki/Downloads.md
           echo "## 🧩 Build Artifacts" >> wiki/Downloads.md
           if compgen -G "artifacts/*.apk" >/dev/null; then
@@ -196,7 +226,7 @@ jobs:
           echo "🔗 [Open Glass UI Downloads Page](${BASE_URL})" >> wiki/Downloads.md
           echo "</div>" >> wiki/Downloads.md
 
-          # --- Glass UI HTML ---
+          # Glass UI HTML
           cat > gh-pages/index.html <<HTML
           <!doctype html><html lang="en"><head>
           <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -209,7 +239,7 @@ jobs:
             footer{margin-top:20px;font-size:.9em;opacity:.7}
           </style></head><body><div class="wrap"><div class="glass">
           <h1>📦 WhispersCpp-Android</h1>
-          <p>Tag: ${TAG} • Updated: ${DATE}</p>
+          <p>Tag: ${TAG} • Updated: ${DATE} • Force Build: ${FORCED}</p>
           <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${BASE_URL}" alt="QR">
           <ul>
           HTML
@@ -227,9 +257,9 @@ jobs:
           curl -s -H "Authorization: token ${GH_TOKEN}" \
             "https://api.github.com/repos/${REPO}/releases?per_page=20" \
             | jq -r '.[] | "<li><a href=\"" + .html_url + "\">" + (.name // .tag_name) + "</a> (" + (.published_at[0:10]) + ")</li>"' >> gh-pages/index.html
-          echo "</ul><footer>Generated by CI/CD v0.7 — Smart Release + QR + History</footer></div></div></body></html>" >> gh-pages/index.html
+          echo "</ul><footer>Generated by CI/CD v0.8 — Smart Release + Force Build</footer></div></div></body></html>" >> gh-pages/index.html
 
-      - name: 📘 Push Wiki (safe)
+      - name: 📘 Push Wiki safely
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -244,7 +274,7 @@ jobs:
             git config user.name "$ACTOR"
             git config user.email "$ACTOR@users.noreply.github.com"
             git add .
-            git commit -m "📘 Auto Wiki Update v0.7 Smart Release"
+            git commit -m "📘 Auto Wiki Update v0.8 Smart Release (Force:${{ inputs.force_build }})"
             git branch -M master
             git remote add origin "$WIKI_URL"
             git push origin master --force
@@ -258,4 +288,4 @@ jobs:
           publish_dir: gh-pages
           publish_branch: gh-pages
           force_orphan: true
-          commit_message: "🌈 Update Pages (v0.7 Smart Release)"
+          commit_message: "🌈 Update Pages (v0.8 Force Build Edition)"
