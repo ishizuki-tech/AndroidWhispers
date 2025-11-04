@@ -214,14 +214,13 @@ jobs:
             git push origin master --force || true
           fi
 
-      - name: 🌈 Generate Wiki + Glass UI (Safe jq)
+      - name: 🌈 Generate Wiki + Glass UI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           TAG=$(jq -r '.version_tag' meta/models.json)
           DATE=$(jq -r '.generated' meta/models.json)
-          FORCED=$(jq -r '.forced_build // "false"' meta/models.json)
           REPO="${{ github.repository }}"
           BASE_URL="https://ishizuki-tech.github.io/AndroidWhispers/"
           mkdir -p wiki gh-pages
