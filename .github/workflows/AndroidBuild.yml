@@ -1,13 +1,13 @@
 # ============================================================
-# 🚀 AndroidWhispers — Smart CI/CD Release + Wiki + Pages + QR v1.2.0
+# 🚀 AndroidWhispers — Smart CI/CD Release + Wiki + Pages + QR v1.2.1 (Final)
 # ------------------------------------------------------------
 # ✅ Dedicated Edition — exclusively for AndroidWhispers
 # ✅ Auto model info → meta/models.json + Wiki + GH Pages
 # ✅ Force clean build, stable release link, and QR integration
-# ✅ 100% jq-safe & GitHub Actions stable
+# ✅ Fully jq-safe & GitHub Actions verified (Ubuntu-latest)
 # ============================================================
 
-name: AndroidWhispers — Smart Release v1.2.0
+name: AndroidWhispers — Smart Release v1.2.1
 
 on:
   workflow_dispatch:
@@ -37,8 +37,8 @@ env:
   OWNER: "ishizuki-tech"
   REPO_NAME: "AndroidWhispers"
   REPO: "ishizuki-tech/AndroidWhispers"
-  BASE_URL: "https://ishizuki-tech.github.io/AndroidWhispers/"
-  WIKI_PAGE_URL: "https://github.com/ishizuki-tech/AndroidWhispers/wiki/Downloads"
+  BASE_URL: "https://ishizuki-tech.github.io/AndroidWhispers"
+  WIKI_PAGE_URL: "https://github.com/ishizuki-tech/AndroidWhispers/wiki/Home"
   NDK_VERSION: 28.1.13356709
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
   ANDROID_HOME: /usr/local/lib/android/sdk
@@ -46,7 +46,7 @@ env:
   GRADLE_OPTS: "-Xmx4g -Dorg.gradle.daemon=true"
 
 # ============================================================
-# 🧠 Smart Detect (with Force Build)
+# 🧠 Smart Detect
 # ============================================================
 jobs:
   detect:
@@ -116,6 +116,15 @@ jobs:
           sudo swapon /swapfile
           free -h
 
+      - name: 📦 Download Whisper Models (if task exists)
+        run: |
+          if ./gradlew tasks --all | grep -q ":app:downloadModel"; then
+            echo "🧠 Running Gradle downloadModel task..."
+            ./gradlew :app:downloadModel --no-daemon || echo "⚠️ downloadModel failed (continuing build)"
+          else
+            echo "ℹ️ No :app:downloadModel task defined."
+          fi
+
       - name: 🧪 Lint & Unit Tests
         if: ${{ inputs.enable_review == true }}
         run: |
@@ -148,7 +157,7 @@ jobs:
 
           MODEL_DIR="app/src/main/assets/models"
           if [ -d "$MODEL_DIR" ]; then
-            echo "📦 Collecting models..."
+            echo "📦 Collecting model files..."
             MODELS_JSON=$(find "$MODEL_DIR" -type f -name "*.bin" -exec bash -c '
               for f; do
                 name=$(basename "$f")
@@ -178,7 +187,7 @@ jobs:
           retention-days: 7
 
   # ============================================================
-  # 🚀 Publish (Release + Wiki + Pages)
+  # 🚀 Publish (Release + Wiki + GH Pages)
   # ============================================================
   publish:
     runs-on: ubuntu-latest
@@ -198,7 +207,7 @@ jobs:
           name: release-apk
           path: artifacts
 
-      - name: 🚀 Create or Update GitHub Release (latest)
+      - name: 🚀 Publish GitHub Release (latest)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "latest"
@@ -245,7 +254,6 @@ jobs:
           # 🗂️ 1. Build-specific page
           # ------------------------------------------------------------
           BUILD_FILE="wiki/Builds/${TAG}.md"
-
           {
             echo "# 📦 AndroidWhispers — Build ${TAG}"
             echo "Generated: ${DATE}"
@@ -299,9 +307,8 @@ jobs:
           git add .
           git commit -m "🏠 Update Wiki Home (${TAG})"
           git branch -M main
-          WIKI_PUSH_URL="https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.wiki.git"
-          git remote add origin "$WIKI_PUSH_URL"
-          git push origin main --force || echo "⚠️ Wiki push skipped."
+          git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.wiki.git"
+          git push origin main --force || (git remote set-url origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.wiki.git" && git push origin main --force)
 
       - name: 💎 Generate GH Pages (Glass UI)
         run: |
@@ -309,8 +316,11 @@ jobs:
           TAG=$(jq -r '.version_tag' $META)
           DATE=$(jq -r '.generated' $META)
           MODELS=$(jq -r '.models[]? | "<li>\(.name) — \(.size)</li>"' $META)
+          mkdir -p gh-pages/models
 
-          mkdir -p gh-pages
+          # Copy model binaries if present
+          cp app/src/main/assets/models/*.bin gh-pages/models/ 2>/dev/null || true
+
           cat > gh-pages/index.html <<HTML
           <!doctype html><html lang="en"><head>
           <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -325,11 +335,11 @@ jobs:
           <h1>📦 AndroidWhispers</h1>
           <p>Updated: ${DATE}</p>
           <p><a href="https://github.com/${REPO}/releases/latest/download/app-release.apk">⬇️ Download app-release.apk</a></p>
-          <p><a href="${WIKI_PAGE_URL}">📘 Model Downloads Wiki</a></p>
+          <p><a href="${WIKI_PAGE_URL}">📘 View Wiki (Build History)</a></p>
           <h3>🎧 Whisper Models</h3>
           <ul>${MODELS}</ul>
           <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${BASE_URL}" alt="QR">
-          <footer>Generated by AndroidWhispers CI/CD v1.2.0</footer>
+          <footer>Generated by AndroidWhispers CI/CD v1.2.1</footer>
           </div></div></body></html>
           HTML
 
@@ -339,4 +349,4 @@ jobs:
           publish_dir: gh-pages
           publish_branch: gh-pages
           force_orphan: true
-          commit_message: "🌈 Update Pages (AndroidWhispers v1.2.0)"
+          commit_message: "🌈 Update GH Pages (AndroidWhispers v1.2.1)"
