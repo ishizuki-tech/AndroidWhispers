@@ -1,14 +1,13 @@
 # ============================================================
-# 🚀 AndroidWhispers — CI/CD Smart Release + QR + Wiki + Stable APK v1.1.0 (Debugged & Verified)
+# 🚀 AndroidWhispers — CI/CD Smart Release + QR + Wiki + Stable APK v1.1.4 (Final Stable)
 # ------------------------------------------------------------
-# ✅ Fix: app-release.apk always generated (standardized)
-# ✅ Fix: Latest Release always points to working download link
-# ✅ Fix: Wiki auto-init & push (clean path)
-# ✅ Fix: jq errors prevented even on empty release list
-# ✅ Fix: Pages glass UI always shows latest working link
+# ✅ Auto model info to meta/models.json + Wiki + GH Pages
+# ✅ Wiki auto-init and push fixed
+# ✅ Always produces valid app-release.apk and working download link
+# ✅ Fully jq-safe, robust release & metadata handling
 # ============================================================
 
-name: AndroidWhispers — Smart Release v1.1.3
+name: AndroidWhispers — Smart Release v1.1.4
 
 on:
   workflow_dispatch:
@@ -42,7 +41,7 @@ env:
   GRADLE_OPTS: "-Xmx4g -Dorg.gradle.daemon=true"
 
 # ============================================================
-# 🧠 Smart Detect (with Force Build option)
+# 🧠 Smart Detect (with Force Build)
 # ============================================================
 jobs:
   detect:
@@ -63,7 +62,6 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
           echo "🔍 Checking for source changes..."
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [ -z "$LAST_TAG" ]; then
@@ -71,7 +69,6 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
           DIFF=$(git diff --name-only "$LAST_TAG" HEAD -- app/ nativelib/ **/*.kts **/*.cpp **/*.h **/*.hpp)
           if [ -n "$DIFF" ]; then
             echo "✅ Source changed since $LAST_TAG"
@@ -82,7 +79,7 @@ jobs:
           fi
 
   # ============================================================
-  # 🏗️ Build (only if changed or forced)
+  # 🏗️ Build
   # ============================================================
   build:
     runs-on: ubuntu-latest
@@ -97,9 +94,6 @@ jobs:
           submodules: recursive
           ref: ${{ inputs.branch || github.ref_name }}
 
-      # ------------------------------------------------------------
-      # Java & Android environment
-      # ------------------------------------------------------------
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -109,9 +103,6 @@ jobs:
         with:
           ndk-version: ${{ env.NDK_VERSION }}
 
-      # ------------------------------------------------------------
-      # Add swap memory for large builds
-      # ------------------------------------------------------------
       - name: 🧩 Add Swap (4GB)
         run: |
           sudo fallocate -l 4G /swapfile
@@ -140,23 +131,40 @@ jobs:
           ls -lh release/
 
       # ------------------------------------------------------------
-      # Generate metadata
+      # 🧠 Generate meta/models.json with model info
       # ------------------------------------------------------------
-      - name: 🧠 Generate meta/models.json
+      - name: 🧠 Generate meta/models.json (with model info)
         id: meta
         run: |
+          set -e
           mkdir -p meta
           DATE=$(date '+%Y-%m-%d %H:%M')
           VERSION=$(grep -E 'versionName' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/' | head -n1 || echo "1.0")
           TAG="v${VERSION}-$(date '+%Y%m%d-%H%M')"
+
+          MODEL_DIR="app/src/main/assets/models"
+          if [ -d "$MODEL_DIR" ]; then
+            echo "📦 Collecting models..."
+            MODELS_JSON=$(find "$MODEL_DIR" -type f -name "*.bin" -exec bash -c '
+              for f; do
+                size=$(du -h "$f" | cut -f1)
+                name=$(basename "$f")
+                echo "{\"name\":\"$name\",\"size\":\"$size\"}"
+              done
+            ' bash {} + | jq -s '.')
+          else
+            MODELS_JSON="[]"
+          fi
+
+          jq -n \
+            --arg tag "$TAG" \
+            --arg date "$DATE" \
+            --argjson models "$MODELS_JSON" \
+            '{version_tag:$tag, generated:$date, models:$models}' > meta/models.json
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          jq -n --arg tag "$TAG" --arg date "$DATE" \
-            '{version_tag:$tag, generated:$date}' > meta/models.json
           cat meta/models.json
 
-      # ------------------------------------------------------------
-      # Upload artifact (for later steps)
-      # ------------------------------------------------------------
       - uses: actions/upload-artifact@v4
         with:
           name: release-apk
@@ -166,7 +174,7 @@ jobs:
           retention-days: 7
 
   # ============================================================
-  # 🚀 Publish: Release + Wiki + GH Pages
+  # 🚀 Publish
   # ============================================================
   publish:
     runs-on: ubuntu-latest
@@ -193,21 +201,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ------------------------------------------------------------
-      # 📘 Ensure Wiki Exists (Safe)
-      # ------------------------------------------------------------
       - name: 📘 Ensure Wiki Exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
           REPO="ishizuki-tech/AndroidWhispers"
           WIKI_URL="https://github.com/${REPO}.wiki.git"
-          echo "🔍 Checking wiki..."
+          echo "🔎 Checking Wiki..."
           if git ls-remote "$WIKI_URL" &>/dev/null; then
             echo "✅ Wiki exists."
           else
-            echo "🆕 Creating wiki repo..."
             mkdir wiki && cd wiki
             git init
             echo "# 📘 AndroidWhispers Wiki" > README.md
@@ -221,55 +224,54 @@ jobs:
             git push origin master --force || true
           fi
 
-      # ------------------------------------------------------------
-      # Generate Wiki & GH Pages
-      # ------------------------------------------------------------
       - name: 🌈 Generate Wiki + Glass UI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          TAG=$(jq -r '.version_tag' artifacts/meta/models.json || echo "latest")
-          DATE=$(jq -r '.generated' artifacts/meta/models.json || date '+%Y-%m-%d %H:%M')
+          META="artifacts/meta/models.json"
+          TAG=$(jq -r '.version_tag' $META || echo "latest")
+          DATE=$(jq -r '.generated' $META || date '+%Y-%m-%d %H:%M')
           REPO="ishizuki-tech/AndroidWhispers"
           BASE_URL="https://ishizuki-tech.github.io/AndroidWhispers/"
           mkdir -p wiki gh-pages
 
-          echo "# 📦 AndroidWhispers (${TAG})" > wiki/Downloads.md
-          echo "Updated: ${DATE}" >> wiki/Downloads.md
-          echo "" >> wiki/Downloads.md
-          echo "## 🧩 Latest APK" >> wiki/Downloads.md
-          echo "- [app-release.apk](https://github.com/${REPO}/releases/latest/download/app-release.apk)" >> wiki/Downloads.md
-          echo "" >> wiki/Downloads.md
-          echo "## 🕓 Recent Releases" >> wiki/Downloads.md
+          {
+            echo "# 📦 AndroidWhispers (${TAG})"
+            echo "Updated: ${DATE}"
+            echo ""
+            echo "## 🧩 Latest APK"
+            echo "- [app-release.apk](https://github.com/${REPO}/releases/latest/download/app-release.apk)"
+            echo ""
+            echo "## 🎧 Whisper Models"
+            echo "| Model | Size |"
+            echo "|:--|--:|"
+            jq -r '.models[]? | "| \(.name) | \(.size) |"' $META || echo "| (none) | |"
+            echo ""
+            echo "## 🕓 Recent Releases"
+            JSON=$(curl -s -H "Authorization: token ${GH_TOKEN}" "https://api.github.com/repos/${REPO}/releases?per_page=10" || echo "[]")
+            echo "$JSON" | jq -er 'if type=="array" then .[] | "- [" + ((.name // .tag_name // "untagged")) + "](" + (.html_url // "#") + ") (" + ((.published_at // "N/A")[0:10]) + ")" else "- (No releases found)" end' || echo "- (No releases found)"
+            echo ""
+            echo "<div align='center'><img src='https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${BASE_URL}' width='180'></div>"
+          } > wiki/Downloads.md
 
-          JSON=$(curl -s -H "Authorization: token ${GH_TOKEN}" "https://api.github.com/repos/${REPO}/releases?per_page=10" || echo "[]")
-          echo "$JSON" | jq -er 'if type=="array" then .[] | "- [" + ((.name // .tag_name // "untagged")) + "](" + (.html_url // "#") + ") (" + ((.published_at // "N/A")[0:10]) + ")" else "- (No releases found)" end' >> wiki/Downloads.md || echo "- (No releases found)" >> wiki/Downloads.md
-
-          echo "<div align='center'>" >> wiki/Downloads.md
-          echo "<img src='https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${BASE_URL}' width='180'>" >> wiki/Downloads.md
-          echo "</div>" >> wiki/Downloads.md
-
-          # Push Wiki
           cd wiki
           git init
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add .
-          git commit -m "📘 Auto Wiki Update (AndroidWhispers v1.1.3)"
+          git commit -m "📘 Auto Wiki Update (${TAG})"
           git branch -M master
           git remote add origin "https://github.com/ishizuki-tech/AndroidWhispers.wiki.git"
           git push origin master --force || echo "⚠️ Wiki push skipped."
 
-      # ------------------------------------------------------------
-      # 💎 Generate GH Pages (Glass UI)
-      # ------------------------------------------------------------
       - name: 💎 Generate GH Pages (Glass UI)
         run: |
           mkdir -p gh-pages
-          TAG=$(jq -r '.version_tag' meta/models.json)
-          DATE=$(jq -r '.generated' meta/models.json)
+          TAG=$(jq -r '.version_tag' artifacts/meta/models.json)
+          DATE=$(jq -r '.generated' artifacts/meta/models.json)
           BASE_URL="https://ishizuki-tech.github.io/AndroidWhispers/"
+          MODELS=$(jq -r '.models[]? | "<li>\(.name) — \(.size)</li>"' artifacts/meta/models.json)
 
           cat > gh-pages/index.html <<HTML
           <!doctype html><html lang="en"><head>
@@ -285,8 +287,10 @@ jobs:
           <h1>📦 AndroidWhispers</h1>
           <p>Updated: ${DATE}</p>
           <p><a href="https://github.com/ishizuki-tech/AndroidWhispers/releases/latest/download/app-release.apk">⬇️ Download app-release.apk</a></p>
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://github.com/ishizuki-tech/AndroidWhispers/releases/latest/download/app-release.apk" alt="QR">
-          <footer>Generated by AndroidWhispers CI/CD v1.1.3</footer>
+          <h3>🎧 Whisper Models</h3>
+          <ul>${MODELS}</ul>
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${BASE_URL}" alt="QR">
+          <footer>Generated by AndroidWhispers CI/CD v1.1.4</footer>
           </div></div></body></html>
           HTML
 
@@ -296,4 +300,4 @@ jobs:
           publish_dir: gh-pages
           publish_branch: gh-pages
           force_orphan: true
-          commit_message: "🌈 Update Pages (AndroidWhispers v1.1.3)"
+          commit_message: "🌈 Update Pages (AndroidWhispers v1.1.4)"
