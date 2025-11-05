@@ -235,17 +235,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📘 Ensure Wiki Exists (main)
+      - name: 📘 Ensure Wiki Exists (master)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           WIKI_URL="https://github.com/${REPO}.wiki.git"
-          echo "🔎 Checking Wiki..."
+          echo "🔎 Checking Wiki (master branch)..."
           if git ls-remote "$WIKI_URL" &>/dev/null; then
             echo "✅ Wiki already exists."
           else
-            echo "🆕 Creating Wiki repository..."
+            echo "🆕 Creating new Wiki repository (master)..."
             mkdir -p wiki && cd wiki
             git init
             echo "# 📘 AndroidWhispers Wiki" > README.md
@@ -259,7 +259,7 @@ jobs:
             git push origin master --force || true
           fi
 
-      - name: 🌈 Generate Wiki (Home as Index + Build History)
+      - name: 🌈 Generate Wiki (Home as Index + Build History on master)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -289,7 +289,7 @@ jobs:
             JSON=$(curl -s -H "Authorization: token ${GH_TOKEN}" "https://api.github.com/repos/${REPO}/releases?per_page=5" || echo "[]")
             echo "$JSON" | jq -er 'if type=="array" then .[] | "- [" + ((.name // .tag_name // "untagged")) + "](" + (.html_url // "#") + ") (" + ((.published_at // "N/A")[0:10]) + ")" else "- (No releases found)" end' || echo "- (No releases found)"
             echo ""
-            echo "<div align='center'><img src='https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${HOMEPAGE_URL}' width='180'></div>"
+            echo "<div align='center'><img src='https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${BASE_URL}' width='180'></div>"
           } > "$BUILD_FILE"
 
           # ------------------------------------------------------------
@@ -317,7 +317,7 @@ jobs:
           } > "$HOME"
 
           # ------------------------------------------------------------
-          # 🪄 3. Commit and push
+          # 🪄 3. Commit and push (force to master)
           # ------------------------------------------------------------
           cd wiki
           git init
@@ -325,9 +325,10 @@ jobs:
           git config user.email "actions@github.com"
           git add .
           git commit -m "🏠 Update Wiki Home (${TAG})"
-          git branch -M main
+          git branch -M master
           git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.wiki.git"
-          git push origin main --force || true
+          echo "🚀 Pushing Wiki updates to master branch..."
+          git push origin master --force || (git remote set-url origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.wiki.git" && git push origin master --force)
 
       - name: 💎 Generate GH Pages (Glass UI)
         run: |
