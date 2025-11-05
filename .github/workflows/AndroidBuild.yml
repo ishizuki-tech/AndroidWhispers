@@ -1,13 +1,13 @@
 # ============================================================
-# 🚀 AndroidWhispers — Smart CI/CD Release + Wiki + Pages + QR v1.0.0Final
+# 🚀 AndroidWhispers — Smart CI/CD Release + Wiki + Pages + QR v1.1.1 DualStable
 # ------------------------------------------------------------
-# ✅ Auto Wiki Refresh even when no source change
-# ✅ Smart Detect (diff-aware) + Force Build mode
-# ✅ Accurate Model Info + GH Pages Glass UI + QR
-# ✅ Full Debug Output + Fallback-safe meta/models.json
+# ✅ GH Pages (Glass UI) + Wiki履歴 両対応
+# ✅ Duplicate-safe Wiki (no root copy)
+# ✅ QR + PagesリンクをWiki Home.mdに自動追加
+# ✅ Smart Detect + Force Build + Fallback meta
 # ============================================================
 
-name: AndroidWhispers — Smart Release v1.0.0Final-ReviewStable
+name: AndroidWhispers — Smart Release v1.1.1-DualStableQR
 
 on:
   workflow_dispatch:
@@ -83,7 +83,7 @@ jobs:
           fi
 
   # ============================================================
-  # 🏗️ Build & Upload
+  # 🏗️ Build + meta/models.json
   # ============================================================
   build:
     runs-on: ubuntu-latest
@@ -107,7 +107,7 @@ jobs:
         with:
           ndk-version: ${{ env.NDK_VERSION }}
 
-      - name: 🧩 Add Swap Memory (4GB)
+      - name: 🧩 Add Swap Memory
         run: |
           sudo fallocate -l 4G /swapfile
           sudo chmod 600 /swapfile
@@ -174,6 +174,7 @@ jobs:
           TAG="v${VERSION}-${GIT_HASH}-$(date '+%Y%m%d-%H%M')"
 
           MODEL_DIR="app/src/main/assets/models"
+          MODELS_JSON="[]"
           if [ -d "$MODEL_DIR" ]; then
             echo "📦 Collecting model files..."
             MODELS_JSON=$(find "$MODEL_DIR" -type f -name "*.bin" -exec bash -c '
@@ -187,11 +188,7 @@ jobs:
           else
             MODELS_JSON="[]"
           fi
-
-          jq -n \
-            --arg tag "$TAG" \
-            --arg date "$DATE" \
-            --argjson models "$MODELS_JSON" \
+          jq -n --arg tag "$TAG" --arg date "$DATE" --argjson models "$MODELS_JSON" \
             '{version_tag:$tag, generated:$date, models:$models}' > meta/models.json
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -216,7 +213,7 @@ jobs:
           echo "- Build Time: $(date)" >> $GITHUB_STEP_SUMMARY
 
   # ============================================================
-  # 🚀 Publish (always runs for Wiki/Pages refresh)
+  # 🚀 Publish (Wiki + Pages dual)
   # ============================================================
   publish:
     runs-on: ubuntu-latest
@@ -238,26 +235,64 @@ jobs:
           path: artifacts
         continue-on-error: true
 
-      - name: 🧩 Prepare meta (safe fallback)
-        id: meta_prepare
+      - name: 🧩 Prepare meta (fallback-safe)
+        id: meta
         run: |
-          set -euo pipefail
-          echo "🚀 Generating GH Pages with meta/models.json data..."
-          
-          # ✅ Prefer artifacted meta file (with fallback)
-
           META="artifacts/meta/models.json"
           if [ ! -f "$META" ]; then
-            echo "⚠️ artifacts/meta/models.json not found — creating fallback."
+            echo "⚠️ No meta found; creating fallback."
             mkdir -p meta
             META="meta/models.json"
-            DATE=$(date '+%Y-%m-%d %H:%M')
-            jq -n --arg tag "no-build-${RANDOM}" --arg date "$DATE" \
+            jq -n --arg tag "no-build-${RANDOM}" --arg date "$(date '+%Y-%m-%d %H:%M')" \
               '{version_tag:$tag, generated:$date, models:[]}' > "$META"
           fi
           echo "meta_path=$META" >> "$GITHUB_OUTPUT"
-          echo "✅ Using meta at: $META"
-          cat "$META"
+
+      - name: 🌈 Generate Wiki (Duplicate-safe + QR)
+        run: |
+          set -e
+          META="${{ steps.meta.outputs.meta_path }}"
+          TAG=$(jq -r '.version_tag' "$META")
+          DATE=$(jq -r '.generated' "$META")
+          mkdir -p wiki/Builds
+
+          echo "# 📦 AndroidWhispers — Build ${TAG}" > wiki/Builds/${TAG}.md
+          echo "Generated: ${DATE}" >> wiki/Builds/${TAG}.md
+          echo "" >> wiki/Builds/${TAG}.md
+          echo "## 🧩 Download" >> wiki/Builds/${TAG}.md
+          echo "- [⬇️ APK](https://github.com/${REPO}/releases/latest/download/app-release.apk)" >> wiki/Builds/${TAG}.md
+          echo "" >> wiki/Builds/${TAG}.md
+          echo "## 🎧 Whisper Models" >> wiki/Builds/${TAG}.md
+          echo "| Model | Size | Bytes |" >> wiki/Builds/${TAG}.md
+          echo "|:--|--:|--:|" >> wiki/Builds/${TAG}.md
+          jq -r '.models[]? | "| \(.name) | \(.size) | \(.bytes) |"' "$META" >> wiki/Builds/${TAG}.md || true
+
+          echo "🧩 Skipping duplicate copy to root to avoid sidebar duplication."
+
+          echo "# 🏠 AndroidWhispers Wiki Home" > wiki/Home.md
+          echo "Updated: ${DATE}" >> wiki/Home.md
+          echo "" >> wiki/Home.md
+          echo "## 📜 Build History (20 latest)" >> wiki/Home.md
+          find wiki/Builds -type f -name '*.md' | sort -r | head -n 20 | while read -r f; do
+            name=$(basename "$f" .md)
+            echo "- [${name}](https://github.com/${REPO}/wiki/Builds/${name})" >> wiki/Home.md
+          done
+          echo "" >> wiki/Home.md
+          echo "## 🌐 GH Pages (Glass UI)" >> wiki/Home.md
+          echo "- [View Downloads Page](${BASE_URL})" >> wiki/Home.md
+          echo "" >> wiki/Home.md
+          echo "## 📱 QR Code (for GH Pages)" >> wiki/Home.md
+          echo "<p align='center'><img src='https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${BASE_URL}' width='180'></p>" >> wiki/Home.md
+
+          cd wiki
+          git init
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add .
+          git commit -m "🏠 Update Wiki ${TAG}" || echo "No changes"
+          git branch -M master
+          git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.wiki.git"
+          git push origin master --force
 
       - name: 💎 Generate GH Pages (Glass UI)
         run: |
@@ -355,4 +390,4 @@ jobs:
           publish_dir: gh-pages
           publish_branch: gh-pages
           force_orphan: true
-          commit_message: "🌈 Update GH Pages (Glass UI + meta/models.json ${{ needs.build.outputs.tag || 'manual' }})"
+          commit_message: "🌈 Update GH Pages + Wiki (QR Enhanced ${TAG})"
