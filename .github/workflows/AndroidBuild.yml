@@ -1,13 +1,13 @@
 # ============================================================
-# 🚀 AndroidWhispers — Smart CI/CD Release + Wiki + Pages + QR v1.2.1 (Final)
+# 🚀 AndroidWhispers — Smart CI/CD Release + Wiki + Pages + QR v1.2.2 (Final Debug Enhanced)
 # ------------------------------------------------------------
-# ✅ Dedicated Edition — exclusively for AndroidWhispers
-# ✅ Auto model info → meta/models.json + Wiki + GH Pages
-# ✅ Force clean build, stable release link, and QR integration
-# ✅ Fully jq-safe & GitHub Actions verified (Ubuntu-latest)
+# ✅ Fully dedicated for AndroidWhispers project
+# ✅ Smart Detect (diff-aware) + Force Build mode
+# ✅ Builds, publishes APK, updates Wiki & GH Pages automatically
+# ✅ Detailed debug logs for task detection, model handling, and Wiki
 # ============================================================
 
-name: AndroidWhispers — Smart Release v1.2.2
+name: AndroidWhispers — Smart Release v1.2.2 (Final Debug)
 
 on:
   workflow_dispatch:
@@ -33,7 +33,7 @@ env:
   OWNER: "ishizuki-tech"
   REPO_NAME: "AndroidWhispers"
   REPO: "ishizuki-tech/AndroidWhispers"
-  HOMEPAGE_URL: "https://ishizuki-tech.github.io/AndroidWhispers"
+  BASE_URL: "https://ishizuki-tech.github.io/AndroidWhispers"
   WIKI_PAGE_URL: "https://github.com/ishizuki-tech/AndroidWhispers/wiki/Home"
   NDK_VERSION: 28.1.13356709
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.branch || github.ref_name }}
+          ref: ${{ github.ref_name }}
 
       - id: detect
         run: |
@@ -63,6 +63,7 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
           echo "🔍 Checking for source changes..."
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [ -z "$LAST_TAG" ]; then
@@ -70,9 +71,11 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          DIFF=$(git diff --name-only "$LAST_TAG" HEAD -- app/ nativelib/ **/*.kts **/*.cpp **/*.h **/*.hpp)
-          if [ -n "$DIFF" ]; then
+
+          CHANGED=$(git diff --name-only "$LAST_TAG" HEAD | grep -E '^(app/|nativelib/|.*\.(kt|kts|cpp|hpp|h))' || true)
+          if [ -n "$CHANGED" ]; then
             echo "✅ Source has changed since $LAST_TAG"
+            echo "$CHANGED"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "🟡 No source changes since $LAST_TAG"
@@ -93,7 +96,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
-          ref: ${{ inputs.branch || github.ref_name }}
+          ref: ${{ github.ref_name }}
 
       - uses: actions/setup-java@v4
         with:
@@ -104,12 +107,13 @@ jobs:
         with:
           ndk-version: ${{ env.NDK_VERSION }}
 
-      - name: 🧩 Add Swap Memory
+      - name: 🧩 Add Swap Memory (4GB)
         run: |
           sudo fallocate -l 4G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
+          echo "✅ Swap memory added successfully."
           free -h
 
       - name: 📦 Download Whisper Models (if task exists, with debug)
@@ -141,7 +145,7 @@ jobs:
         if: ${{ inputs.enable_review == true }}
         run: |
           ./gradlew :app:lintDebug || echo "::warning::Lint warnings"
-          ./gradlew :app:testDebugUnitTest || echo "::warning::Tests failed"
+          ./gradlew :app:testDebugUnitTest || echo "::warning::Unit tests failed"
 
       - name: 🏗️ Build Release APK
         run: |
@@ -153,7 +157,7 @@ jobs:
             exit 1
           fi
           cp "$APK" release/app-release.apk
-          echo "✅ APK ready: release/app-release.apk"
+          echo "✅ APK ready at release/app-release.apk"
 
       # ------------------------------------------------------------
       # 🧠 Generate meta/models.json with model info
@@ -188,6 +192,7 @@ jobs:
             '{version_tag:$tag, generated:$date, models:$models}' > meta/models.json
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "✅ Generated meta/models.json:"
           cat meta/models.json
 
       - uses: actions/upload-artifact@v4
@@ -230,16 +235,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📘 Ensure Wiki Exists
+      - name: 📘 Ensure Wiki Exists (main)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           WIKI_URL="https://github.com/${REPO}.wiki.git"
-          echo "🔎 Checking wiki..."
+          echo "🔎 Checking Wiki..."
           if git ls-remote "$WIKI_URL" &>/dev/null; then
-            echo "✅ Wiki exists."
+            echo "✅ Wiki already exists."
           else
-            mkdir wiki && cd wiki
+            echo "🆕 Creating Wiki repository..."
+            mkdir -p wiki && cd wiki
             git init
             echo "# 📘 AndroidWhispers Wiki" > README.md
             echo "Auto-generated by CI/CD." >> README.md
@@ -304,9 +311,9 @@ jobs:
             echo ""
             echo "## 📦 Download Links"
             echo "- [⬇️ Latest APK](https://github.com/${REPO}/releases/latest/download/app-release.apk)"
-            echo "- [🌐 GitHub Pages](${HOMEPAGE_URL})"
+            echo "- [🌐 GitHub Pages](${BASE_URL})"
             echo ""
-            echo "<p align='center'><img src='https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${HOMEPAGE_URL}' width='180'></p>"
+            echo "<p align='center'><img src='https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${BASE_URL}' width='180'></p>"
           } > "$HOME"
 
           # ------------------------------------------------------------
@@ -320,7 +327,7 @@ jobs:
           git commit -m "🏠 Update Wiki Home (${TAG})"
           git branch -M main
           git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.wiki.git"
-          git push origin main --force || (git remote set-url origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.wiki.git" && git push origin main --force)
+          git push origin main --force || true
 
       - name: 💎 Generate GH Pages (Glass UI)
         run: |
@@ -350,8 +357,8 @@ jobs:
           <p><a href="${WIKI_PAGE_URL}">📘 View Wiki (Build History)</a></p>
           <h3>🎧 Whisper Models</h3>
           <ul>${MODELS}</ul>
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${HOMEPAGE_URL}" alt="QR">
-          <footer>Generated by AndroidWhispers CI/CD v1.2.1</footer>
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${BASE_URL}" alt="QR">
+          <footer>Generated by AndroidWhispers CI/CD v1.2.2</footer>
           </div></div></body></html>
           HTML
 
@@ -361,4 +368,4 @@ jobs:
           publish_dir: gh-pages
           publish_branch: gh-pages
           force_orphan: true
-          commit_message: "🌈 Update GH Pages (AndroidWhispers v1.2.1)"
+          commit_message: "🌈 Update GH Pages (AndroidWhispers v1.2.2)"

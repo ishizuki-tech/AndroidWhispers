@@ -13,7 +13,7 @@ set -Eeuo pipefail
 
 # --- Config (env-overridable) --------------------------------
 MODEL_DIR="${MODEL_DIR:-src/main/assets/models}"
-BASE_URL="${BASE_URL:-https://huggingface.co/ggerganov/whisper.cpp/resolve/main}"
+MODEL_URL="${MODEL_URL:-https://huggingface.co/ggerganov/whisper.cpp/resolve/main}"
 # space-separated list
 MODEL_NAMES="${MODEL_NAMES:-ggml-tiny-q5_1.bin ggml-base-q5_1.bin ggml-small-q5_1.bin ggml-model-q4_0.bin}"
 JACARANDA_Q4_URL="${JACARANDA_Q4_URL:-https://huggingface.co/jboat/jacaranda-asr-whispercpp/resolve/main/ggml-model-q4_0.bin}"
@@ -32,7 +32,7 @@ url_for_model() {
   if [ "$name" = "ggml-model-q4_0.bin" ]; then
     echo "$JACARANDA_Q4_URL"
   else
-    echo "$BASE_URL/$name"
+    echo "$MODEL_URL/$name"
   fi
 }
 
