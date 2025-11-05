@@ -1,4 +1,4 @@
-<p><a href="index.html" target=_self title="Seperate Page">Go to index</a></p>
+<p><a href="[Download APK](https://ishizuki-tech.github.io/AndroidWhispers/)" target=_self title="Seperate Page">Go to index</a></p>
 
 # 🎧 AndroidWhispers
 
