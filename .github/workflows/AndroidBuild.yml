@@ -143,11 +143,13 @@ jobs:
             echo "ensure it's within the ':app' module and Gradle sync succeeds locally."
           fi
 
-      - name: 🧪 Lint & Unit Tests
+      - name: 🧪 Lint & Unit Tests (excluding whisper.cpp)
         if: ${{ inputs.enable_review == true }}
         run: |
-          ./gradlew :app:lintDebug || echo "::warning::Lint warnings"
-          ./gradlew :app:testDebugUnitTest || echo "::warning::Unit tests failed"
+          echo "🧪 Running lint + unit tests (excluding whisper.cpp)..."
+          ./gradlew :app:lintDebug :app:testDebugUnitTest \
+            -x :nativelib:lint -x :nativelib:testDebugUnitTest \
+            --stacktrace --no-daemon || echo "::warning::Lint or Unit Tests failed (excluding whisper.cpp)"
 
       - name: 🏗️ Build Release APK
         run: |
@@ -257,16 +259,17 @@ jobs:
           DATE=$(jq -r '.generated' "$META")
           mkdir -p wiki/Builds
 
-          echo "# 📦 AndroidWhispers — Build ${TAG}" > wiki/Builds/${TAG}.md
-          echo "Generated: ${DATE}" >> wiki/Builds/${TAG}.md
-          echo "" >> wiki/Builds/${TAG}.md
-          echo "## 🧩 Download" >> wiki/Builds/${TAG}.md
-          echo "- [⬇️ APK](https://github.com/${REPO}/releases/latest/download/app-release.apk)" >> wiki/Builds/${TAG}.md
-          echo "" >> wiki/Builds/${TAG}.md
-          echo "## 🎧 Whisper Models" >> wiki/Builds/${TAG}.md
-          echo "| Model | Size | Bytes |" >> wiki/Builds/${TAG}.md
-          echo "|:--|--:|--:|" >> wiki/Builds/${TAG}.md
-          jq -r '.models[]? | "| \(.name) | \(.size) | \(.bytes) |"' "$META" >> wiki/Builds/${TAG}.md || true
+          echo "🧩 Generating Wiki page for tag: ${TAG}"
+          echo "# 📦 AndroidWhispers — Build ${TAG}" > "wiki/Builds/${TAG}.md"
+          echo "Generated: ${DATE}" >> "wiki/Builds/${TAG}.md"
+          echo "" >> "wiki/Builds/${TAG}.md"
+          echo "## 🧩 Download" >> "wiki/Builds/${TAG}.md"
+          echo "- [⬇️ APK](https://github.com/${REPO}/releases/latest/download/app-release.apk)" >> "wiki/Builds/${TAG}.md"
+          echo "" >> "wiki/Builds/${TAG}.md"
+          echo "## 🎧 Whisper Models" >> "wiki/Builds/${TAG}.md"
+          echo "| Model | Size | Bytes |" >> "wiki/Builds/${TAG}.md"
+          echo "|:--|--:|--:|" >> "wiki/Builds/${TAG}.md"
+          jq -r '.models[]? | "| \(.name) | \(.size) | \(.bytes) |"' "$META" >> "wiki/Builds/${TAG}.md" || true
 
           echo "🧩 Skipping duplicate copy to root to avoid sidebar duplication."
 
@@ -274,10 +277,25 @@ jobs:
           echo "Updated: ${DATE}" >> wiki/Home.md
           echo "" >> wiki/Home.md
           echo "## 📜 Build History (20 latest)" >> wiki/Home.md
-          find wiki/Builds -type f -name '*.md' | sort -r | head -n 20 | while read -r f; do
-            name=$(basename "$f" .md)
-            echo "- [${name}](https://github.com/${REPO}/wiki/Builds/${name})" >> wiki/Home.md
-          done
+
+          echo "🧩 Debug: Listing available wiki build files..."
+          set +e
+          find wiki/Builds -type f -name '*.md' | sort -r | head -n 20 | tee wiki/_build_list.log
+          set -e
+
+          COUNT=$(find wiki/Builds -type f -name '*.md' | wc -l)
+          if [ "$COUNT" -eq 0 ]; then
+            echo "⚠️ No build pages found, adding placeholder to Home.md"
+            echo "_No builds found yet._" >> wiki/Home.md
+          else
+            find wiki/Builds -type f -name '*.md' | sort -r | head -n 20 | while read -r f; do
+              name=$(basename "$f" .md)
+              link="https://github.com/${REPO}/wiki/${name}"
+              echo "🪶 Added link: ${link}"
+              echo "- [${name}](${link})" >> wiki/Home.md
+            done
+          fi
+
           echo "" >> wiki/Home.md
           echo "## 🌐 GH Pages (Glass UI)" >> wiki/Home.md
           echo "- [View Downloads Page](${BASE_URL})" >> wiki/Home.md
@@ -285,18 +303,36 @@ jobs:
           echo "## 📱 QR Code (for GH Pages)" >> wiki/Home.md
           echo "<p align='center'><img src='https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${BASE_URL}' width='180'></p>" >> wiki/Home.md
 
+          echo "🧩 Debug: Showing generated wiki directory structure..."
+          ls -R wiki || true
+          echo "🧩 Debug: Showing Home.md preview..."
+          head -n 20 wiki/Home.md || true
+
           cd wiki
           git init
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add .
 
-          git commit -m "🏠 Update Wiki ${TAG}" || echo "⚠️ No file changes — creating empty commit"
-          git commit --allow-empty -m "📦 Ensure master branch exists"
-          
+          if git diff --cached --quiet; then
+            echo "⚠️ No changes detected — creating empty commit to preserve master branch"
+            git commit --allow-empty -m "📦 Ensure master branch exists"
+          else
+            git commit -m "🏠 Update Wiki ${TAG}"
+          fi
+
           git branch -M master
           git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.wiki.git"
-          git push origin master --force
+
+          echo "🚀 Pushing wiki updates to master..."
+          git push origin master --force || {
+            echo "❌ Wiki push failed; printing current repo status for debugging:"
+            git status
+            git log --oneline -n 5 || true
+            exit 1
+          }
+
+          echo "✅ Wiki updated successfully on master branch!"
 
       - name: 💎 Generate GH Pages (Glass UI)
         run: |
