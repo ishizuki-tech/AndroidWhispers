@@ -1,13 +1,14 @@
 # ============================================================
-# 🚀 AndroidWhispers — Smart CI/CD Release + Wiki + Pages + QR v1.1.1 DualStable
+# 🚀 AndroidWhispers — Smart CI/CD Release + Wiki(master) + Pages + QR v1.1.1-FinalDualStableQR
 # ------------------------------------------------------------
 # ✅ GH Pages (Glass UI) + Wiki履歴 両対応
-# ✅ Duplicate-safe Wiki (no root copy)
+# ✅ Wikiは常に master
+# ✅ Fallback meta + jq安全化
 # ✅ QR + PagesリンクをWiki Home.mdに自動追加
 # ✅ Smart Detect + Force Build + Fallback meta
 # ============================================================
 
-name: AndroidWhispers — Smart Release v1.1.1-DualStableQR
+name: AndroidWhispers — Smart Release v1.1.1-FinalDualStableQR
 
 on:
   workflow_dispatch:
@@ -240,13 +241,13 @@ jobs:
         run: |
           META="artifacts/meta/models.json"
           if [ ! -f "$META" ]; then
-            echo "⚠️ No meta found; creating fallback."
+            echo "⚠️ artifacts/meta/models.json not found, creating fallback."
             mkdir -p meta
             META="meta/models.json"
             jq -n --arg tag "no-build-${RANDOM}" --arg date "$(date '+%Y-%m-%d %H:%M')" \
               '{version_tag:$tag, generated:$date, models:[]}' > "$META"
           fi
-          echo "meta_path=$META" >> "$GITHUB_OUTPUT"
+          echo "meta_path=$META" >> $GITHUB_OUTPUT
 
       - name: 🌈 Generate Wiki (Duplicate-safe + QR)
         run: |
@@ -289,7 +290,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add .
-          git commit -m "🏠 Update Wiki ${TAG}" || echo "No changes"
+          git diff --quiet && echo "No Wiki changes" || git commit -m "🏠 Update Wiki ${TAG}"
           git branch -M master
           git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.wiki.git"
           git push origin master --force
@@ -297,42 +298,17 @@ jobs:
       - name: 💎 Generate GH Pages (Glass UI)
         run: |
           set -euo pipefail
-          META="${{ steps.meta_prepare.outputs.meta_path }}"
+          META="${{ steps.meta.outputs.meta_path }}"
           TAG=$(jq -r '.version_tag' "$META")
           DATE=$(jq -r '.generated' "$META")
-          REPO="${{ github.repository }}"
-          OWNER="${{ github.repository_owner }}"
-          BASE_URL="https://${OWNER}.github.io/$(basename $REPO)"
-          mkdir -p gh-pages/models
-
-          echo "📦 Repo: $REPO"
-          echo "🏷️  Tag: $TAG"
-          echo "🕓  Generated: $DATE"
-          echo "--------------------------------------"
-
-          # ------------------------------------------------------------
-          # 🧩 Build detailed table from meta/models.json
-          # ------------------------------------------------------------
-          echo "🧩 Building model table..."
+          mkdir -p gh-pages
           TABLE=$(jq -r '
-            [.models[]?] | 
-            (["Model","Size","Bytes","Source","Hash"] | @tsv),
-            (.[] | [
-              (.name // "unknown"),
-              (.size // "N/A"),
-              ((.bytes // 0) | tostring),
-              (.source // "—"),
-              (.hash // "—")
-            ] | @tsv)
+            [.models[]?] | (["Model","Size","Bytes"] | @tsv),
+            (.[] | [.name, .size, (.bytes|tostring)] | @tsv)
           ' "$META" | awk '
-            BEGIN {
-              print "<table><tr><th>Model</th><th>Size</th><th>Bytes</th><th>Source</th><th>Hash</th></tr>"
-            }
-            NR>1 {
-              src = ($4=="—")?"—":"<a href=\"" $4 "\" target=_blank>link</a>"
-              printf "<tr><td><b>%s</b></td><td>%s</td><td>%s</td><td>%s</td><td><code>%s</code></td></tr>\n",$1,$2,$3,src,$5
-            }
-            END { print "</table>" }
+            BEGIN {print "<table><tr><th>Model</th><th>Size</th><th>Bytes</th></tr>"}
+            NR>1 {printf "<tr><td>%s</td><td>%s</td><td>%s</td></tr>\n",$1,$2,$3}
+            END {print "</table>"}
           ')
 
           echo "✅ Model table built successfully."
