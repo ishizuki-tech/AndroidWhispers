@@ -290,7 +290,10 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add .
-          git diff --quiet && echo "No Wiki changes" || git commit -m "🏠 Update Wiki ${TAG}"
+
+          git commit -m "🏠 Update Wiki ${TAG}" || echo "⚠️ No file changes — creating empty commit"
+          git commit --allow-empty -m "📦 Ensure master branch exists"
+          
           git branch -M master
           git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.wiki.git"
           git push origin master --force
