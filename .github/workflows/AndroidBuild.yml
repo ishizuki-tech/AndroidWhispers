@@ -116,13 +116,29 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      - name: 📦 Download Whisper Models (if task exists)
+      - name: 📦 Download Whisper Models (if task exists, with debug)
         run: |
-          if ./gradlew tasks --all | grep -q ":app:downloadModel"; then
-            echo "🧠 Running Gradle downloadModel task..."
-            ./gradlew :app:downloadModel --no-daemon || echo "⚠️ downloadModel failed (continuing build)"
+          set -e
+          echo "🔍 Checking for Gradle task ':app:downloadModel' ..."
+          echo "🧩 Gradle version:"
+          ./gradlew -v || true
+          echo "🗂️ Listing available tasks in :app module..."
+          ./gradlew -p app tasks --all | tee gradle_tasks.log || true
+
+          if grep -q "downloadModel" gradle_tasks.log; then
+            echo "✅ Found task ':app:downloadModel'. Running..."
+            echo "-------------------------------------------"
+            ./gradlew :app:downloadModel --stacktrace --no-daemon
+            echo "-------------------------------------------"
+            echo "🎉 Model download completed successfully."
           else
-            echo "ℹ️ No :app:downloadModel task defined."
+            echo "⚠️ Task ':app:downloadModel' not found. Skipping model download."
+            echo "📁 Debug info:"
+            echo "Current directory: $(pwd)"
+            echo "Submodules: $(ls -1)"
+            echo "-------------------------------------------"
+            echo "If your app/build.gradle.kts defines downloadModel,"
+            echo "ensure it's within the ':app' module and Gradle sync succeeds locally."
           fi
 
       - name: 🧪 Lint & Unit Tests
