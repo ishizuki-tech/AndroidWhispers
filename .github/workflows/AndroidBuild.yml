@@ -250,6 +250,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 🧩 Ensure META exists (fallback when build skipped)
+        run: |
+          mkdir -p meta
+          if [ ! -f artifacts/meta/models.json ]; then
+            DATE=$(date '+%Y-%m-%d %H:%M')
+            jq -n --arg tag "no-build-${RANDOM}" --arg date "$DATE" \
+              '{version_tag:$tag, generated:$date, models:[]}' > meta/models.json
+          fi
+
       - name: 📘 Ensure Wiki Exists (master)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -386,7 +395,21 @@ jobs:
           set -euo pipefail
           echo "🚀 Generating GH Pages with meta/models.json data..."
           
-          META="meta/models.json"
+          # ✅ Prefer artifacted meta file (with fallback)
+          META="artifacts/meta/models.json"
+          if [ ! -f "$META" ]; then
+            echo "⚠️ No artifacts/meta/models.json found, checking fallback..."
+            META="meta/models.json"
+          fi
+          if [ ! -f "$META" ]; then
+            echo "⚠️ meta/models.json missing — generating minimal placeholder."
+            mkdir -p meta
+            META="meta/models.json"
+            DATE=$(date '+%Y-%m-%d %H:%M')
+            jq -n --arg tag "no-build-${RANDOM}" --arg date "$DATE" \
+              '{version_tag:$tag, generated:$date, models:[]}' > "$META"
+          fi
+
           TAG=$(jq -r '.version_tag' "$META")
           DATE=$(jq -r '.generated' "$META")
           REPO="${{ github.repository }}"
@@ -398,7 +421,9 @@ jobs:
           echo "🏷️  Tag: $TAG"
           echo "🕓  Generated: $DATE"
 
-          # Build detailed table from meta/models.json
+          # ------------------------------------------------------------
+          # 🧩 Build detailed table from meta/models.json
+          # ------------------------------------------------------------
           echo "🧩 Building model table..."
           TABLE=$(jq -r '
             [.models[]?] | 
@@ -406,24 +431,31 @@ jobs:
             (.[] | [
               (.name // "unknown"),
               (.size // "N/A"),
-              (.bytes | tostring),
+              ((.bytes // 0) | tostring),
               (.source // "—"),
               (.hash // "—")
             ] | @tsv)
           ' "$META" | awk '
-            BEGIN { print "<table><tr><th>Model</th><th>Size</th><th>Bytes</th><th>Source</th><th>Hash</th></tr>" }
+            BEGIN {
+              print "<table><tr><th>Model</th><th>Size</th><th>Bytes</th><th>Source</th><th>Hash</th></tr>"
+            }
             NR>1 {
-              printf "<tr><td><b>%s</b></td><td>%s</td><td>%s</td><td><a href=\"%s\" target=_blank>link</a></td><td><code>%s</code></td></tr>\\n",$1,$2,$3,$4,$5
+              src = ($4=="—")?"—":"<a href=\"" $4 "\" target=_blank>link</a>"
+              printf "<tr><td><b>%s</b></td><td>%s</td><td>%s</td><td>%s</td><td><code>%s</code></td></tr>\n",$1,$2,$3,src,$5
             }
             END { print "</table>" }
           ')
 
           echo "✅ Model table built successfully."
 
-          # Copy models if present
+          # ------------------------------------------------------------
+          # 📦 Copy model binaries if present
+          # ------------------------------------------------------------
           cp app/src/main/assets/models/*.bin gh-pages/models/ 2>/dev/null || echo "⚠️ No model binaries found locally."
 
-          # Generate Glass UI page
+          # ------------------------------------------------------------
+          # 💎 Generate Glass UI HTML
+          # ------------------------------------------------------------
           cat > gh-pages/index.html <<HTML
           <!doctype html><html lang="en"><head>
           <meta charset="utf-8"/>
@@ -468,4 +500,4 @@ jobs:
           publish_dir: gh-pages
           publish_branch: gh-pages
           force_orphan: true
-          commit_message: "🌈 Update GH Pages (Glass UI + meta/models.json ${TAG})"
+          commit_message: "🌈 Update GH Pages (Glass UI + meta/models.json ${{ needs.build.outputs.tag || 'manual' }})"
